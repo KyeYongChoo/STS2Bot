@@ -1,0 +1,11 @@
+{
+  "<pad>": 0,
+  "<unk>": 1,
+  "BOTTLED_POTENTIAL": 2,
+  "COLORLESS_POTION": 3,
+  "ENERGY_POTION": 4,
+  "FIRE_POTION": 5,
+  "STABLE_SERUM": 6,
+  "STRENGTH_POTION": 7,
+  "SWIFT_POTION": 8
+}

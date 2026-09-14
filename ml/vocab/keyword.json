@@ -1,0 +1,10 @@
+{
+  "<pad>": 0,
+  "<unk>": 1,
+  "Block": 2,
+  "Energy": 3,
+  "Exhaust": 4,
+  "Strength": 5,
+  "Unplayable": 6,
+  "Vulnerable": 7
+}

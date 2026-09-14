@@ -1,0 +1,12 @@
+{
+  "<pad>": 0,
+  "<unk>": 1,
+  "Attack": 2,
+  "Buff": 3,
+  "Debuff": 4,
+  "DebuffStrong": 5,
+  "Defend": 6,
+  "Heal": 7,
+  "StatusCard": 8,
+  "Summon": 9
+}

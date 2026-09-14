@@ -1,0 +1,12 @@
+{
+  "<pad>": 0,
+  "<unk>": 1,
+  "BURNING_BLOOD": 2,
+  "GNARLED_HAMMER": 3,
+  "GORGET": 4,
+  "LEES_WAFFLE": 5,
+  "PARRYING_SHIELD": 6,
+  "PENDULUM": 7,
+  "SPARKLING_ROUGE": 8,
+  "WAR_PAINT": 9
+}

@@ -1,0 +1,8 @@
+{
+  "<pad>": 0,
+  "<unk>": 1,
+  "Attack": 2,
+  "Power": 3,
+  "Skill": 4,
+  "Status": 5
+}

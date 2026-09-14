@@ -1,0 +1,8 @@
+{
+  "<pad>": 0,
+  "<unk>": 1,
+  "AllEnemies": 2,
+  "AnyEnemy": 3,
+  "None": 4,
+  "Self": 5
+}

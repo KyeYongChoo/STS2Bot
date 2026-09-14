@@ -1,0 +1,18 @@
+{
+  "<pad>": 0,
+  "<unk>": 1,
+  "BRUTE_RUBY_RAIDER": 2,
+  "CROSSBOW_RUBY_RAIDER": 3,
+  "EYE_WITH_TEETH": 4,
+  "FOGMOG": 5,
+  "FUZZY_WURM_CRAWLER": 6,
+  "INKLET": 7,
+  "LEAF_SLIME_S": 8,
+  "MAWLER": 9,
+  "NIBBIT": 10,
+  "SHRINKER_BEETLE": 11,
+  "TRACKER_RUBY_RAIDER": 12,
+  "TWIG_SLIME_M": 13,
+  "TWIG_SLIME_S": 14,
+  "VANTOM": 15
+}

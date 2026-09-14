@@ -1,0 +1,7 @@
+{
+  "<pad>": 0,
+  "<unk>": 1,
+  "Common": 2,
+  "Rare": 3,
+  "Uncommon": 4
+}

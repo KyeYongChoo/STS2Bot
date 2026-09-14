@@ -1,0 +1,7 @@
+vendor/
+data/
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
