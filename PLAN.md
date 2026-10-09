@@ -41,6 +41,12 @@ Heuristic = teacher + baseline. Live game until the heuristic gate; emulator bef
 - [ ] 3.4 Events (? nodes), rest-vs-smith, treasure, boss relic choice
 
 ## Phase 4 — Automation & measurement (after the heuristic passes the eyeball check)
+- [ ] Before the first unattended/overnight batch: uninstall the Untapped Companion (or
+      run bot sessions under a separate Windows user without it). It uploads every
+      finished `.run` file, including modded A0 runs, and backfills runs it missed on its
+      next launch, so just closing it isn't enough. The bot already reads its own copy of
+      the tier lists (`data/tier-lists/`, refresh with `python -m sts2bot.tierlist`
+      while Untapped is still installed)
 - [ ] Menu / character select / game_over handling (investigate `menu_select` in
       `vendor/STS2MCP/McpMod.cs`) → unattended back-to-back runs
 - [ ] Win-rate tracker over N runs (Act 1/2/3 clear %, final boss win %)

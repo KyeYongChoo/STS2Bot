@@ -1,20 +1,30 @@
-"""Reads tier-list data from the Untapped companion app (a separate
-desktop app, not a game mod) so card-reward picks can rank options by
-community tier instead of just rarity.
+"""Reads tier-list data originally from the Untapped companion app (a
+separate desktop app, not a game mod) so card-reward picks can rank options
+by community tier instead of just rarity.
 
-Data lives at %APPDATA%\\untapped-companion\\sts2\\tier-lists\\:
+The bot reads a project-local copy in data/tier-lists/ (gitignored --
+these are other people's lists, e.g. Baalorlord's), so it keeps working
+once Untapped is uninstalled from the machine running bot runs. Refresh
+the copy from Untapped's cache with:
+
+    python -m sts2bot.tierlist
+
+Untapped's cache (same layout as the copy) lives at %APPDATA%\\untapped-companion\\sts2\\tier-lists\\:
   - index.json lists every installed tier list (uuid, name, author,
     "color" = which class it's for, e.g. "ironclad"/"silent"/"colorless",
     isEnabled, gameVersion).
   - <uuid>.json holds {"items": {CARD_ID: {"tier": "S"/"A"/..., ...}}}.
 
-This module only reads that data; it doesn't touch the companion app.
+This module only reads Untapped's data; it never writes to the companion app.
 """
 from __future__ import annotations
 
 import json
 import os
+import shutil
 from pathlib import Path
+
+PROJECT_TIER_LIST_DIR = Path(__file__).resolve().parent.parent / "data" / "tier-lists"
 
 # Baalorlord's lists use a handful of non-letter labels for standout
 # cards alongside S/A/B/C/D. Ranking below is a judgment call -- tune
@@ -35,9 +45,25 @@ TIER_RANK = {
 UNRANKED = 0
 
 
-def _default_tier_list_dir() -> Path:
+def untapped_tier_list_dir() -> Path:
     appdata = os.environ.get("APPDATA", "")
     return Path(appdata) / "untapped-companion" / "sts2" / "tier-lists"
+
+
+def sync_from_untapped(src: str | Path | None = None, dest: str | Path | None = None) -> int:
+    """Copies Untapped's cached tier lists (index.json + every <uuid>.json)
+    into the project-local dir. Returns the number of files copied; raises
+    FileNotFoundError if Untapped has no cached index.json to copy."""
+    src = Path(src) if src else untapped_tier_list_dir()
+    dest = Path(dest) if dest else PROJECT_TIER_LIST_DIR
+    if not (src / "index.json").exists():
+        raise FileNotFoundError(f"no Untapped tier-list cache at {src}")
+    dest.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for path in src.glob("*.json"):
+        shutil.copy2(path, dest / path.name)
+        copied += 1
+    return copied
 
 
 def _character_to_color(character: str | None) -> str | None:
@@ -49,13 +75,13 @@ def _character_to_color(character: str | None) -> str | None:
 class TierList:
     """Loads and caches Untapped tier-list rankings, keyed by class.
 
-    Degrades to "everything unranked" if the companion app isn't
-    installed or hasn't cached any lists yet -- callers should treat
-    rank() as advisory, not required.
+    Degrades to "everything unranked" if no lists have been synced into
+    data/tier-lists/ yet -- callers should treat rank() as advisory, not
+    required.
     """
 
     def __init__(self, tier_list_dir: str | Path | None = None):
-        self.dir = Path(tier_list_dir) if tier_list_dir else _default_tier_list_dir()
+        self.dir = Path(tier_list_dir) if tier_list_dir else PROJECT_TIER_LIST_DIR
         self._index: dict | None = None
         self._items_by_color: dict[str, dict[str, dict]] = {}
 
@@ -68,6 +94,9 @@ class TierList:
                     self._index = json.loads(index_path.read_text(encoding="utf-8"))
                 except (json.JSONDecodeError, OSError):
                     self._index = {}
+            else:
+                print(f"[tierlist] no tier lists at {self.dir}; card picks fall back to "
+                      f"rarity. Run `python -m sts2bot.tierlist` to copy them from Untapped.")
         return self._index
 
     def _items_for_color(self, color: str) -> dict[str, dict]:
@@ -115,3 +144,11 @@ class TierList:
         if entry is None:
             entry = self._items_for_color("colorless").get(card_id)
         return entry.get("tier") if entry else None
+
+
+if __name__ == "__main__":
+    n = sync_from_untapped()
+    print(f"Copied {n} tier-list files from {untapped_tier_list_dir()} to {PROJECT_TIER_LIST_DIR}")
+    for entry in TierList()._load_index().values():
+        if entry.get("isEnabled"):
+            print(f"  enabled: {entry.get('name')} ({entry.get('color')})")

@@ -53,11 +53,20 @@ The mod's source is cloned locally (gitignored, not part of this repo) at
    pip install -r requirements.txt
    ```
 
-5. **Start a run manually** — pick a character, get past the menu to the
+5. **Optional — copy card tier lists** from the
+   [Untapped.gg Companion](https://sts2.untapped.gg/) app (if installed)
+   so card-reward picks use community tiers instead of just rarity:
+   ```powershell
+   python -m sts2bot.tierlist
+   ```
+   This copies them into `data/tier-lists/` (gitignored); the bot only
+   reads that copy, so Untapped doesn't need to stay installed.
+
+6. **Start a run manually** — pick a character, get past the menu to the
    map or your first combat. Menu/character-select automation isn't
    implemented yet (see Limitations below).
 
-6. **Run the bot:**
+7. **Run the bot:**
    ```powershell
    python run.py                 # deliberate pace, ~0.6s between actions
    python run.py --delay 0       # as fast as possible
