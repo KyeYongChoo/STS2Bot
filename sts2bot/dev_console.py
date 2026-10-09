@@ -76,6 +76,24 @@ def close_console(*, settle: float = 0.15) -> None:
     time.sleep(settle)
 
 
+def run_console_commands(commands: list[str], window_title_hint: str = WINDOW_TITLE_HINT,
+                         *, settle: float = 0.15) -> None:
+    """Focuses the game, opens the console once, runs each command in
+    order, then closes it -- for chaining several commands, since
+    run_console_command toggles the console with every call."""
+    import pyautogui
+
+    focus_game_window(window_title_hint)
+    pyautogui.press(CONSOLE_KEY)
+    time.sleep(settle)
+    for command in commands:
+        pyautogui.typewrite(command, interval=0.02)
+        time.sleep(settle)
+        pyautogui.press("enter")
+        time.sleep(settle)
+    close_console(settle=settle)
+
+
 def warp_to_fight(encounter_id: str, window_title_hint: str = WINDOW_TITLE_HINT) -> None:
     """Jumps straight to the start of `encounter_id`'s combat, e.g.
     warp_to_fight("NIBBITS_WEAK") for Act 1's lone-Nibbit easy-pool fight

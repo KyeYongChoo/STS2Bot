@@ -1,0 +1,170 @@
+From 179d0ca356358a88dcf91e6885d8e6cf3125a644 Mon Sep 17 00:00:00 2001
+From: KyeYongChoo <163633375+KyeYongChoo@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 15:20:30 +0800
+Subject: [PATCH 1/2] Add dev_set_deck action and run.act_id
+
+dev_set_deck replaces the master deck with an exact list of cards,
+including upgrades and enchantments. The dev console's upgrade/enchant
+commands only touch the combat hand, so there was no way to set up a
+test fight's deck with those. Every entry is validated before the deck
+is touched; the swap reuses the console commands' own game calls.
+
+run.act_id exposes which act model the current act rolled (e.g.
+OVERGROWTH vs UNDERDOCKS), which run.act's index alone can't tell apart.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ McpMod.Actions.cs      |   1 +
+ McpMod.DevDeck.cs      | 112 +++++++++++++++++++++++++++++++++++++++++
+ McpMod.StateBuilder.cs |   4 ++
+ 3 files changed, 117 insertions(+)
+ create mode 100644 McpMod.DevDeck.cs
+
+diff --git a/McpMod.Actions.cs b/McpMod.Actions.cs
+index 2553f3f..d0a9f86 100644
+--- a/McpMod.Actions.cs
++++ b/McpMod.Actions.cs
+@@ -87,6 +87,7 @@ public static partial class McpMod
+             "crystal_sphere_set_tool" => ExecuteCrystalSphereSetTool(data),
+             "crystal_sphere_click_cell" => ExecuteCrystalSphereClickCell(data),
+             "crystal_sphere_proceed" => ExecuteCrystalSphereProceed(),
++            "dev_set_deck" => ExecuteDevSetDeck(player, data),
+             _ => Error($"Unknown action: {action}")
+         };
+     }
+diff --git a/McpMod.DevDeck.cs b/McpMod.DevDeck.cs
+new file mode 100644
+index 0000000..707670f
+--- /dev/null
++++ b/McpMod.DevDeck.cs
+@@ -0,0 +1,112 @@
++using System;
++using System.Collections.Generic;
++using System.Linq;
++using System.Text.Json;
++using System.Threading.Tasks;
++using MegaCrit.Sts2.Core.Commands;
++using MegaCrit.Sts2.Core.Entities.Cards;
++using MegaCrit.Sts2.Core.Entities.Players;
++using MegaCrit.Sts2.Core.Models;
++using MegaCrit.Sts2.Core.Models.Exceptions;
++using MegaCrit.Sts2.Core.Runs;
++using Godot;
++
++namespace STS2_MCP;
++
++/// <summary>
++/// Dev/testing action: replace the master deck (Player.Deck) wholesale.
++///
++/// The game's dev console can add/remove deck cards one at a time, but its
++/// `upgrade` and `enchant` commands only target cards in the combat hand --
++/// those changes never reach the master deck. This sets the deck directly,
++/// using the same game calls the console commands use (CardPileCmd.Add /
++/// RemoveFromDeck, CardCmd.Upgrade / Enchant), so a test fight can start
++/// from an exact deck including upgrades and enchantments.
++///
++/// POST {"action": "dev_set_deck", "cards": [
++///     {"id": "BASH", "upgrades": 1},
++///     {"id": "STRIKE_IRONCLAD", "enchantment": "GLAM", "enchantment_amount": 1},
++///     ...]}
++///
++/// Every entry is validated (card exists, enchantment exists and can apply)
++/// before the deck is touched, so a bad id changes nothing. The swap itself
++/// is async (removal hooks run); poll player.deck to see it land.
++/// </summary>
++public static partial class McpMod
++{
++    private static Dictionary<string, object?> ExecuteDevSetDeck(Player player, Dictionary<string, JsonElement> data)
++    {
++        if (!data.TryGetValue("cards", out var cardsElem) || cardsElem.ValueKind != JsonValueKind.Array)
++            return Error("Missing 'cards' (array of {id, upgrades?, enchantment?, enchantment_amount?})");
++
++        var runState = RunManager.Instance.DebugOnlyGetState();
++        if (runState == null)
++            return Error("No run state");
++
++        var newCards = new List<CardModel>();
++        int index = 0;
++        foreach (var entry in cardsElem.EnumerateArray())
++        {
++            string? cardId = entry.TryGetProperty("id", out var idElem) ? idElem.GetString()?.ToUpperInvariant() : null;
++            if (string.IsNullOrEmpty(cardId))
++                return Error($"cards[{index}]: missing 'id'");
++
++            var canonical = ModelDb.AllCards.FirstOrDefault(c => c.Id.Entry == cardId);
++            if (canonical == null)
++                return Error($"cards[{index}]: card '{cardId}' not found");
++
++            // Created and modified before it's in any pile, so no upgrade/
++            // enchant preview animations and no run-history entries.
++            var card = runState.CreateCard(canonical, player);
++
++            int upgrades = entry.TryGetProperty("upgrades", out var upElem) ? upElem.GetInt32() : 0;
++            for (int i = 0; i < upgrades && card.IsUpgradable; i++)
++                CardCmd.Upgrade(card);
++
++            if (entry.TryGetProperty("enchantment", out var enchElem) && enchElem.GetString() is { Length: > 0 } enchId)
++            {
++                var modelId = new ModelId(ModelId.SlugifyCategory<EnchantmentModel>(), enchId.ToUpperInvariant());
++                EnchantmentModel enchantment;
++                try
++                {
++                    enchantment = ModelDb.GetById<EnchantmentModel>(modelId).ToMutable();
++                }
++                catch (ModelNotFoundException)
++                {
++                    return Error($"cards[{index}]: enchantment '{modelId.Entry}' not found");
++                }
++                int amount = entry.TryGetProperty("enchantment_amount", out var amtElem) ? amtElem.GetInt32() : 1;
++                if (!enchantment.CanEnchant(card))
++                    return Error($"cards[{index}]: '{cardId}' can't be enchanted with '{modelId.Entry}'");
++                CardCmd.Enchant(enchantment, card, amount);
++            }
++
++            newCards.Add(card);
++            index++;
++        }
++
++        var oldCards = player.Deck.Cards.ToList();
++        _ = ReplaceDeck(oldCards, newCards);  // logs its own failures
++
++        return new Dictionary<string, object?>
++        {
++            ["status"] = "ok",
++            ["message"] = $"Replacing deck: removing {oldCards.Count} cards, adding {newCards.Count}"
++        };
++    }
++
++    private static async Task ReplaceDeck(List<CardModel> oldCards, List<CardModel> newCards)
++    {
++        try
++        {
++            if (oldCards.Count > 0)
++                await CardPileCmd.RemoveFromDeck(oldCards, showPreview: false);
++            if (newCards.Count > 0)
++                await CardPileCmd.Add(newCards, PileType.Deck, skipVisuals: true);
++        }
++        catch (Exception ex)
++        {
++            GD.PrintErr($"[STS2 MCP] dev_set_deck failed: {ex}");
++        }
++    }
++}
+diff --git a/McpMod.StateBuilder.cs b/McpMod.StateBuilder.cs
+index c01deeb..77c1e7e 100644
+--- a/McpMod.StateBuilder.cs
++++ b/McpMod.StateBuilder.cs
+@@ -611,6 +611,10 @@ public static partial class McpMod
+         result["run"] = new Dictionary<string, object?>
+         {
+             ["act"] = runState.CurrentActIndex + 1,
++            // Which act model this run rolled for the current act (e.g.
++            // OVERGROWTH vs UNDERDOCKS for act 1) -- `act` alone can't tell
++            // alternate acts apart.
++            ["act_id"] = SafeGetText(() => runState.Acts[runState.CurrentActIndex].Id.Entry),
+             ["floor"] = runState.TotalFloor,
+             ["ascension"] = runState.AscensionLevel
+         };
+-- 
+2.54.0.windows.1
+

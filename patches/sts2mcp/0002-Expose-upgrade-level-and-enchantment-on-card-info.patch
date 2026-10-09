@@ -1,0 +1,30 @@
+From 08bd80c7ca5f3ecacb8d0e6bdc3326d8d572c38e Mon Sep 17 00:00:00 2001
+From: KyeYongChoo <163633375+KyeYongChoo@users.noreply.github.com>
+Date: Fri, 9 Oct 2026 15:21:36 +0800
+Subject: [PATCH 2/2] Expose upgrade level and enchantment on card info
+
+Lets a client read back exactly what dev_set_deck applied, and see
+enchanted/multi-upgraded cards in normal play.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ McpMod.StateBuilder.cs | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/McpMod.StateBuilder.cs b/McpMod.StateBuilder.cs
+index 77c1e7e..2dddf50 100644
+--- a/McpMod.StateBuilder.cs
++++ b/McpMod.StateBuilder.cs
+@@ -1278,6 +1278,9 @@ public static partial class McpMod
+             ["description"] = SafeGetCardDescription(card, pile),
+             ["rarity"] = card.Rarity.ToString(),
+             ["is_upgraded"] = card.IsUpgraded,
++            ["upgrades"] = card.CurrentUpgradeLevel,
++            ["enchantment"] = card.Enchantment?.Id.Entry,
++            ["enchantment_amount"] = card.Enchantment?.Amount,
+             ["keywords"] = BuildHoverTips(card.HoverTips)
+         };
+     }
+-- 
+2.54.0.windows.1
+

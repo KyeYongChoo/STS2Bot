@@ -53,14 +53,15 @@ The mod's source is cloned locally (gitignored, not part of this repo) at
    pip install -r requirements.txt
    ```
 
-5. **Optional — copy card tier lists** from the
-   [Untapped.gg Companion](https://sts2.untapped.gg/) app (if installed)
-   so card-reward picks use community tiers instead of just rarity:
+5. **Optional — copy game data and card tier lists** from the
+   [Untapped.gg Companion](https://sts2.untapped.gg/) app (if installed).
+   Tier lists let card-reward picks use community tiers instead of just
+   rarity; game data (every card/event/encounter id) feeds the dev loader:
    ```powershell
-   python -m sts2bot.tierlist
+   python -m sts2bot.gamedata
    ```
-   This copies them into `data/tier-lists/` (gitignored); the bot only
-   reads that copy, so Untapped doesn't need to stay installed.
+   This copies both into `data/` (gitignored); the bot only reads those
+   copies, so Untapped doesn't need to stay installed.
 
 6. **Start a run manually** — pick a character, get past the menu to the
    map or your first combat. Menu/character-select automation isn't
@@ -74,6 +75,33 @@ The mod's source is cloned locally (gitignored, not part of this repo) at
    ```
    Watch it play in the actual game window. Console output shows every
    decision as it's made (e.g. `[Act 1 Floor 3] monster: play_card(card_index=2, target=jaw_worm_0)`).
+
+## Dev loader (testing a fight without playing a run to it)
+
+```powershell
+python -m sts2bot.loader_ui
+```
+
+A small window to jump straight into a fight or event, optionally after
+switching act (e.g. Overgrowth → Underdocks, via the console's `act`
+command, without abandoning the run) and setting the deck. Deck options:
+keep the current one; a "stage deck" (your current Strike/Defend/Bash plus
+floor−1 random Ironclad cards at card-reward rarity odds; set a seed to
+reproduce one); or a custom deck built in the editor, with upgrades and
+enchantments. Then run `python run.py` to have the bot play the fight.
+
+Requirements:
+- **The patched mod build.** Deck setting uses a `dev_set_deck` action
+  that only this project's STS2MCP build has (the console's own
+  `upgrade`/`enchant` only touch cards in the combat hand, never the deck).
+  Build and install it with the game closed:
+  ```powershell
+  vendor\STS2MCP\build.ps1 -GameDir "C:\Program Files (x86)\Steam\steamapps\common\Slay the Spire 2"
+  scripts\install_mod.ps1 -FromBuild
+  ```
+- `python -m sts2bot.gamedata` run at least once (see Setup step 5).
+- The game window visible — act/fight/event/heal go through the in-game
+  dev console as real keystrokes (`sts2bot/dev_console.py`).
 
 ## Current heuristic strategy
 

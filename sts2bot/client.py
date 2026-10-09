@@ -129,3 +129,12 @@ class STS2Client:
 
     def menu_select(self, option: str, seed: str | None = None):
         return self.act("menu_select", option=option, seed=seed)
+
+    # --- dev/testing only (needs this project's patched STS2MCP build,
+    # see vendor/STS2MCP McpMod.DevDeck.cs) ------------------------------
+
+    def dev_set_deck(self, cards: list[dict[str, Any]]):
+        """Replaces the master deck with exactly `cards`, each
+        {"id": CARD_ID, "upgrades": n, "enchantment": ID, "enchantment_amount": n}
+        (only "id" required). Async in-game: poll player.deck to see it land."""
+        return self.act("dev_set_deck", cards=cards)
