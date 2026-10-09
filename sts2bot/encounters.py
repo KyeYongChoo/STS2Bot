@@ -58,6 +58,12 @@ class Encounter:
     # fit a single `enemies` template (Ruby Raiders: any 3 of 5 raiders).
     # When set, matching uses these instead of `enemies`.
     lineups: tuple[tuple[str, ...], ...] = ()
+    # The fight continues into a second phase after the main enemy dies
+    # (Phrog Parasite -> its Wrigglers; Waterfall Giant; Test Subject).
+    # Damage it was about to deal is cancelled on death, so nothing uses
+    # this yet -- but e.g. "dump everything into the killing blow" is wrong
+    # for these, since the fight isn't over.
+    second_phase: bool = False
 
 
 def base_entity_id(entity_id: str | None) -> str | None:
@@ -120,7 +126,7 @@ def identify_encounter(enemies: list[dict], pool: list[Encounter] | None = None)
     if not live:
         return None
 
-    candidates = [enc for enc in (pool if pool is not None else ACT1_OVERGROWTH)
+    candidates = [enc for enc in (pool if pool is not None else ALL_ENCOUNTERS)
                   if (any(Counter(lineup) == live for lineup in enc.lineups) if enc.lineups
                       else _enemies_match(enc.enemies, live))]
     return candidates[0] if len(candidates) == 1 else None
@@ -280,6 +286,7 @@ ACT1_OVERGROWTH: list[Encounter] = [
     Encounter("Phrog Parasite", "elite", "elite",
               ["PHROG_PARASITE"],
               fight_id="PHROG_PARASITE_ELITE",
+              second_phase=True,
               notes="Alternates Infect (shuffles 3 Infection into discard) / "
                     "Lash (4x4 dmg). On death, Infested triggers and summons "
                     "4 Wrigglers (Nasty Bite 6 dmg, or Wriggle: shuffle "
@@ -334,3 +341,310 @@ ACT1_OVERGROWTH: list[Encounter] = [
                     "block evenly."
                     " This boss is the most unique, where whether you're winning or not happens before the fight itself. Incentivize multihit cards if act boss is vantom, as well as scaling cards. dont play large value attacks until slipper stacks are gone, play small attacks or multihits."),
 ]
+
+
+# --------------------------------------------------------------------- #
+# Act 1 (alternate): Underdocks
+# --------------------------------------------------------------------- #
+ACT1_UNDERDOCKS: list[Encounter] = [
+    # --- easy ---
+    Encounter("Corpse Slugs (Weak)", "monster", "easy",
+              ["CORPSE_SLUG", "CORPSE_SLUG"],  # Corpse Slug, Corpse Slug
+              fight_id="CORPSE_SLUGS_WEAK",
+              notes=""),
+    Encounter("Seapunk (Weak)", "monster", "easy",
+              ["SEAPUNK"],  # Seapunk
+              fight_id="SEAPUNK_WEAK",
+              notes=""),
+    Encounter("Sludge Spinner", "monster", "easy",
+              ["SLUDGE_SPINNER"],  # Sludge Spinner
+              fight_id="SLUDGE_SPINNER_WEAK",
+              notes=""),
+    Encounter("Toadpoles", "monster", "easy",
+              ["TOADPOLE", "TOADPOLE"],  # Toadpole, Toadpole
+              fight_id="TOADPOLES_WEAK",
+              notes=""),
+    # --- normal ---
+    Encounter("Corpse Slugs", "monster", "normal",
+              ["CORPSE_SLUG", "CORPSE_SLUG", "CORPSE_SLUG"],  # Corpse Slug, Corpse Slug, Corpse Slug
+              fight_id="CORPSE_SLUGS_NORMAL",
+              notes=""),
+    Encounter("Cultists", "monster", "normal",
+              ["CALCIFIED_CULTIST", "DAMP_CULTIST"],  # Calcified Cultist, Damp Cultist
+              fight_id="CULTISTS_NORMAL",
+              notes=""),
+    Encounter("Fossil Stalker", "monster", "normal",
+              ["FOSSIL_STALKER"],  # Fossil Stalker
+              fight_id="FOSSIL_STALKER_NORMAL",
+              notes=""),
+    Encounter("Gremlin Merc", "monster", "normal",
+              ["GREMLIN_MERC"],  # Gremlin Merc
+              fight_id="GREMLIN_MERC_NORMAL",
+              notes=""),
+    Encounter("Haunted Ship", "monster", "normal",
+              ["HAUNTED_SHIP"],  # Haunted Ship
+              fight_id="HAUNTED_SHIP_NORMAL",
+              notes=""),
+    Encounter("Living Fog", "monster", "normal",
+              ["LIVING_FOG"],  # Living Fog
+              fight_id="LIVING_FOG_NORMAL",
+              notes=""),
+    Encounter("Punch Construct", "monster", "normal",
+              ["PUNCH_CONSTRUCT"],  # Punch Construct
+              fight_id="PUNCH_CONSTRUCT_NORMAL",
+              notes=""),
+    Encounter("Seapunk", "monster", "normal",
+              ["CALCIFIED_CULTIST", "SEAPUNK"],  # Calcified Cultist, Seapunk
+              fight_id="SEAPUNK_NORMAL",
+              notes=""),
+    Encounter("Sewer Clam", "monster", "normal",
+              ["SEWER_CLAM"],  # Sewer Clam
+              fight_id="SEWER_CLAM_NORMAL",
+              notes=""),
+    Encounter("Two Tailed Rats", "monster", "normal",
+              ["TWO_TAILED_RAT", "TWO_TAILED_RAT", "TWO_TAILED_RAT"],  # Two-Tailed Rat, Two-Tailed Rat, Two-Tailed Rat
+              fight_id="TWO_TAILED_RATS_NORMAL",
+              notes=""),
+    # --- elite ---
+    Encounter("Phantasmal Gardeners", "elite", "elite",
+              ["PHANTASMAL_GARDENER", "PHANTASMAL_GARDENER", "PHANTASMAL_GARDENER", "PHANTASMAL_GARDENER"],  # Phantasmal Gardener, Phantasmal Gardener, Phantasmal Gardener, Phantasmal Gardener
+              fight_id="PHANTASMAL_GARDENERS_ELITE",
+              notes=""),
+    Encounter("Skulking Colony", "elite", "elite",
+              ["SKULKING_COLONY"],  # Skulking Colony
+              fight_id="SKULKING_COLONY_ELITE",
+              notes=""),
+    Encounter("Terror Eel", "elite", "elite",
+              ["TERROR_EEL"],  # Terror Eel
+              fight_id="TERROR_EEL_ELITE",
+              notes=""),
+    # --- boss ---
+    Encounter("Lagavulin Matriarch", "boss", "boss",
+              ["LAGAVULIN_MATRIARCH"],  # Lagavulin Matriarch
+              fight_id="LAGAVULIN_MATRIARCH_BOSS",
+              notes=""),
+    Encounter("Soul Fysh", "boss", "boss",
+              ["SOUL_FYSH"],  # Soul Fysh
+              fight_id="SOUL_FYSH_BOSS",
+              notes=""),
+    Encounter("Waterfall Giant", "boss", "boss",
+              ["WATERFALL_GIANT"],  # Waterfall Giant
+              fight_id="WATERFALL_GIANT_BOSS",
+              second_phase=True,
+              notes=""),
+]
+
+# --------------------------------------------------------------------- #
+# Act 2: Hive
+# --------------------------------------------------------------------- #
+ACT2_HIVE: list[Encounter] = [
+    # --- easy ---
+    Encounter("Bowlbugs (Weak)", "monster", "easy",
+              ["random -- see lineups"],  # e.g. Bowlbug (Rock), Bowlbug (Egg)
+              lineups=(("BOWLBUG_ROCK", "BOWLBUG_EGG",),
+                       ("BOWLBUG_ROCK", "BOWLBUG_NECTAR",)),
+              fight_id="BOWLBUGS_WEAK",
+              notes=""),
+    Encounter("Exoskeletons (Weak)", "monster", "easy",
+              ["EXOSKELETON", "EXOSKELETON", "EXOSKELETON"],  # Exoskeleton, Exoskeleton, Exoskeleton
+              fight_id="EXOSKELETONS_WEAK",
+              notes=""),
+    Encounter("Thieving Hopper", "monster", "easy",
+              ["THIEVING_HOPPER"],  # Thieving Hopper
+              fight_id="THIEVING_HOPPER_WEAK",
+              notes=""),
+    Encounter("Tunneler", "monster", "easy",
+              ["TUNNELER"],  # Tunneler
+              fight_id="TUNNELER_WEAK",
+              notes=""),
+    # --- normal ---
+    Encounter("Bowlbugs", "monster", "normal",
+              ["random -- see lineups"],  # e.g. Bowlbug (Rock), Bowlbug (Egg), Bowlbug (Nectar)
+              lineups=(("BOWLBUG_ROCK", "BOWLBUG_EGG", "BOWLBUG_NECTAR",),
+                       ("BOWLBUG_ROCK", "BOWLBUG_EGG", "BOWLBUG_SILK",),
+                       ("BOWLBUG_ROCK", "BOWLBUG_NECTAR", "BOWLBUG_SILK",)),
+              fight_id="BOWLBUGS_NORMAL",
+              notes=""),
+    Encounter("Chompers", "monster", "normal",
+              ["CHOMPER", "CHOMPER"],  # Chomper, Chomper
+              fight_id="CHOMPERS_NORMAL",
+              notes=""),
+    Encounter("Exoskeletons", "monster", "normal",
+              ["EXOSKELETON", "EXOSKELETON", "EXOSKELETON", "EXOSKELETON"],  # Exoskeleton, Exoskeleton, Exoskeleton, Exoskeleton
+              fight_id="EXOSKELETONS_NORMAL",
+              notes=""),
+    Encounter("Hunter Killer", "monster", "normal",
+              ["HUNTER_KILLER"],  # Hunter Killer
+              fight_id="HUNTER_KILLER_NORMAL",
+              notes=""),
+    Encounter("Louse Progenitor", "monster", "normal",
+              ["LOUSE_PROGENITOR"],  # Louse Progenitor
+              fight_id="LOUSE_PROGENITOR_NORMAL",
+              notes=""),
+    Encounter("Mytes", "monster", "normal",
+              ["MYTE", "MYTE"],  # Myte, Myte
+              fight_id="MYTES_NORMAL",
+              notes=""),
+    Encounter("Ovicopter", "monster", "normal",
+              ["OVICOPTER"],  # Ovicopter
+              fight_id="OVICOPTER_NORMAL",
+              notes=""),
+    Encounter("Slumbering Beetle", "monster", "normal",
+              ["BOWLBUG_ROCK", "BOWLBUG_SILK", "SLUMBERING_BEETLE"],  # Bowlbug (Rock), Bowlbug (Silk), Slumbering Beetle
+              fight_id="SLUMBERING_BEETLE_NORMAL",
+              notes=""),
+    Encounter("Spiny Toad", "monster", "normal",
+              ["SPINY_TOAD"],  # Spiny Toad
+              fight_id="SPINY_TOAD_NORMAL",
+              notes=""),
+    Encounter("The Obscura", "monster", "normal",
+              ["THE_OBSCURA"],  # The Obscura
+              fight_id="THE_OBSCURA_NORMAL",
+              notes=""),
+    # --- elite ---
+    Encounter("Decimillipede", "elite", "elite",
+              ["DECIMILLIPEDE_SEGMENT_FRONT", "DECIMILLIPEDE_SEGMENT_MIDDLE", "DECIMILLIPEDE_SEGMENT_BACK"],  # Decimillipede, Decimillipede, Decimillipede
+              fight_id="DECIMILLIPEDE_ELITE",
+              notes=""),
+    Encounter("Entomancer", "elite", "elite",
+              ["ENTOMANCER"],  # Entomancer
+              fight_id="ENTOMANCER_ELITE",
+              notes=""),
+    Encounter("Infested Prisms", "elite", "elite",
+              ["INFESTED_PRISM"],  # Infested Prism
+              fight_id="INFESTED_PRISMS_ELITE",
+              notes=""),
+    # --- boss ---
+    Encounter("Kaiser Crab", "boss", "boss",
+              ["CRUSHER", "ROCKET"],  # Crusher, Rocket
+              fight_id="KAISER_CRAB_BOSS",
+              notes=""),
+    Encounter("Knowledge Demon", "boss", "boss",
+              ["KNOWLEDGE_DEMON"],  # Knowledge Demon
+              fight_id="KNOWLEDGE_DEMON_BOSS",
+              notes=""),
+    Encounter("The Insatiable", "boss", "boss",
+              ["THE_INSATIABLE"],  # The Insatiable
+              fight_id="THE_INSATIABLE_BOSS",
+              notes=""),
+]
+
+# --------------------------------------------------------------------- #
+# Act 3: Glory
+# --------------------------------------------------------------------- #
+ACT3_GLORY: list[Encounter] = [
+    # --- easy ---
+    Encounter("Devoted Sculptor", "monster", "easy",
+              ["DEVOTED_SCULPTOR"],  # Devoted Sculptor
+              fight_id="DEVOTED_SCULPTOR_WEAK",
+              notes=""),
+    Encounter("Scrolls of Biting (Weak)", "monster", "easy",
+              ["SCROLL_OF_BITING", "SCROLL_OF_BITING", "SCROLL_OF_BITING"],  # Scroll of Biting, Scroll of Biting, Scroll of Biting
+              fight_id="SCROLLS_OF_BITING_WEAK",
+              notes=""),
+    Encounter("Turret Operator", "monster", "easy",
+              ["LIVING_SHIELD", "TURRET_OPERATOR"],  # Living Shield, Turret Operator
+              fight_id="TURRET_OPERATOR_WEAK",
+              notes=""),
+    # --- normal ---
+    Encounter("Axebots", "monster", "normal",
+              ["AXEBOT"],  # Axebot
+              fight_id="AXEBOTS_NORMAL",
+              notes=""),
+    Encounter("Construct Menagerie", "monster", "normal",
+              ["PUNCH_CONSTRUCT", "CUBEX_CONSTRUCT", "CUBEX_CONSTRUCT"],  # Punch Construct, Cubex Construct, Cubex Construct
+              fight_id="CONSTRUCT_MENAGERIE_NORMAL",
+              notes=""),
+    Encounter("Fabricator", "monster", "normal",
+              ["FABRICATOR"],  # Fabricator
+              fight_id="FABRICATOR_NORMAL",
+              notes=""),
+    Encounter("Frog Knight", "monster", "normal",
+              ["FROG_KNIGHT"],  # Frog Knight
+              fight_id="FROG_KNIGHT_NORMAL",
+              notes=""),
+    Encounter("Globe Head", "monster", "normal",
+              ["GLOBE_HEAD"],  # Globe Head
+              fight_id="GLOBE_HEAD_NORMAL",
+              notes=""),
+    Encounter("Owl Magistrate", "monster", "normal",
+              ["OWL_MAGISTRATE"],  # Owl Magistrate
+              fight_id="OWL_MAGISTRATE_NORMAL",
+              notes=""),
+    Encounter("Scrolls of Biting", "monster", "normal",
+              ["SCROLL_OF_BITING", "SCROLL_OF_BITING", "SCROLL_OF_BITING", "SCROLL_OF_BITING"],  # Scroll of Biting, Scroll of Biting, Scroll of Biting, Scroll of Biting
+              fight_id="SCROLLS_OF_BITING_NORMAL",
+              notes=""),
+    Encounter("Slimed Berserker", "monster", "normal",
+              ["SLIMED_BERSERKER"],  # Slimed Berserker
+              fight_id="SLIMED_BERSERKER_NORMAL",
+              notes=""),
+    Encounter("The Lost and Forgotten", "monster", "normal",
+              ["THE_LOST", "THE_FORGOTTEN"],  # The Lost, The Forgotten
+              fight_id="THE_LOST_AND_FORGOTTEN_NORMAL",
+              notes=""),
+    # --- elite ---
+    Encounter("Knights", "elite", "elite",
+              ["FLAIL_KNIGHT", "SPECTRAL_KNIGHT", "MAGI_KNIGHT"],  # Flail Knight, Spectral Knight, Magi Knight
+              fight_id="KNIGHTS_ELITE",
+              notes=""),
+    Encounter("Mecha Knight", "elite", "elite",
+              ["MECHA_KNIGHT"],  # Mecha Knight
+              fight_id="MECHA_KNIGHT_ELITE",
+              notes=""),
+    Encounter("Soul Nexus", "elite", "elite",
+              ["SOUL_NEXUS"],  # Soul Nexus
+              fight_id="SOUL_NEXUS_ELITE",
+              notes=""),
+    # --- boss ---
+    Encounter("Aeonglass", "boss", "boss",
+              ["AEONGLASS"],  # Aeonglass
+              fight_id="AEONGLASS_BOSS",
+              notes=""),
+    Encounter("Queen", "boss", "boss",
+              ["TORCH_HEAD_AMALGAM", "QUEEN"],  # Torch Head Amalgam, Queen
+              fight_id="QUEEN_BOSS",
+              notes=""),
+    Encounter("Test Subject", "boss", "boss",
+              ["TEST_SUBJECT"],  # Test Subject #C8
+              fight_id="TEST_SUBJECT_BOSS",
+              second_phase=True,
+              notes=""),
+]
+
+# --------------------------------------------------------------------- #
+# Fights started by events (other than Dense Vegetation, above)
+# --------------------------------------------------------------------- #
+EVENT_ENCOUNTERS: list[Encounter] = [
+    # --- event ---
+    Encounter("Battleworn Dummy V1", "event", "event",
+              ["BATTLE_FRIEND_V1"],  # Battle Friend V1.0
+              fight_id="BATTLEWORN_DUMMY_EVENT_V1_ENCOUNTER",
+              notes=""),
+    Encounter("Battleworn Dummy V2", "event", "event",
+              ["BATTLE_FRIEND_V2"],  # Battle Friend V2.0
+              fight_id="BATTLEWORN_DUMMY_EVENT_V2_ENCOUNTER",
+              notes=""),
+    Encounter("Battleworn Dummy V3", "event", "event",
+              ["BATTLE_FRIEND_V3"],  # Battle Friend V3.0
+              fight_id="BATTLEWORN_DUMMY_EVENT_V3_ENCOUNTER",
+              notes=""),
+    Encounter("Fake Merchant", "event", "event",
+              ["FAKE_MERCHANT_MONSTER"],  # The Merchant???
+              fight_id="FAKE_MERCHANT_EVENT_ENCOUNTER",
+              notes=""),
+    Encounter("Mysterious Knight", "event", "event",
+              ["MYSTERIOUS_KNIGHT"],  # Mysterious Knight
+              fight_id="MYSTERIOUS_KNIGHT_EVENT_ENCOUNTER",
+              notes=""),
+    Encounter("Punch Off", "event", "event",
+              ["PUNCH_CONSTRUCT", "PUNCH_CONSTRUCT"],  # Punch Construct, Punch Construct
+              fight_id="PUNCH_OFF_EVENT_ENCOUNTER",
+              notes=""),
+    Encounter("The Architect", "event", "event",
+              ["ARCHITECT"],  # The Architect
+              fight_id="THE_ARCHITECT_EVENT_ENCOUNTER",
+              notes=""),
+]
+
+ALL_ENCOUNTERS: list[Encounter] = ACT1_OVERGROWTH + ACT1_UNDERDOCKS + ACT2_HIVE + ACT3_GLORY + EVENT_ENCOUNTERS

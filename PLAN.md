@@ -15,7 +15,17 @@ Heuristic = teacher + baseline. Live game until the heuristic gate; emulator bef
       loader (`python -m sts2bot.loader_ui`), confirm Inklets' left/middle/right = list
       order, and Underdocks (act 1's alternate act)
 - [ ] 1.2 Generic combat improvements in `heuristic.py` (targeting by intent / kill thresholds
-      in multi-enemy fights, 1-3 turn damage lookahead)
+      in multi-enemy fights, 1-3 turn damage lookahead). Known gaps:
+      - Powers are always played first, but usually aren't worth it near the end of a
+        fight (e.g. enemy dies within a turn or two)
+      - Second-phase fights (`Encounter.second_phase`: Phrog Parasite, Waterfall Giant,
+        Test Subject) continue after the main enemy dies, so "spend everything on the
+        killing blow" is wrong there. The boss's pending damage is cancelled on death, so
+        nothing breaks yet
+- [ ] 1.1b Card notes: fill in `sts2bot/cards.py` (Ironclad + colorless, one entry per card,
+      like `encounters.py`), then turn them into card-play / card-value rules
+- [ ] 1.1c Encounter notes for Underdocks / Hive / Glory / event fights (entries exist in
+      `encounters.py` with empty notes)
 - [ ] 1.3 Potion use: per-potion rule triggers (prevent lethal, elite/boss turn 1,
       use before discarding when slots full); out-of-combat potions (e.g. Foul Potion at
       merchant/? nodes) as special cases
