@@ -6,8 +6,7 @@ from datetime import datetime
 from .client import STS2ApiError, STS2Client
 from .heuristic import HeuristicStrategy
 from .logger import TrajectoryLogger
-
-STUCK_REPEAT_LIMIT = 6
+from .watchdog import JamError, Watchdog
 
 
 def _describe(state: dict, action_name: str, params: dict) -> str:
@@ -19,14 +18,19 @@ def _describe(state: dict, action_name: str, params: dict) -> str:
 
 class Bot:
     def __init__(self, client: STS2Client, strategy: HeuristicStrategy, delay: float = 0.6,
-                 log_dir: str = "data/trajectories", on_state=None):
+                 log_dir: str = "data/trajectories", on_state=None,
+                 jam_dir: str = "data/jams", on_jam: str = "continue"):
+        # "continue": report the jam and keep going (fine while watching);
+        # "abort": stop the bot (for unattended runs, so it doesn't spin forever).
+        if on_jam not in ("continue", "abort"):
+            raise ValueError(f"on_jam must be 'continue' or 'abort', not {on_jam!r}")
+        self.on_jam = on_jam
         self.client = client
         self.strategy = strategy
         self.delay = delay
         run_id = datetime.now().strftime("%Y%m%d-%H%M%S")
         self.logger = TrajectoryLogger(run_id, log_dir=log_dir)
-        self._last_action: tuple[str, str] | None = None
-        self._repeat_count = 0
+        self.watchdog = Watchdog(run_id, jam_dir=jam_dir)
         # Optional callback(state) invoked every poll before deciding an
         # action -- lets external tooling (e.g. sts2bot/dev_console.py's
         # encounter test loop) observe state transitions like "combat just
@@ -43,6 +47,8 @@ class Bot:
                 time.sleep(self.delay)
         except KeyboardInterrupt:
             print("\nStopped by user.")
+        except JamError as e:
+            print(f"\nStopping: bot is jammed -- {e}")
         finally:
             self.logger.close()
 
@@ -50,35 +56,31 @@ class Bot:
         state = self.client.get_state()
         if self.on_state is not None:
             self.on_state(state)
+        self.watchdog.on_poll(state)
         decision = self.strategy.decide(state)
 
         if decision is None:
+            self.watchdog.on_no_rule(state)
             print(f"[{state.get('state_type')}] no rule for this screen; waiting. "
                   f"(extend sts2bot/heuristic.py to handle it)")
-            return
-
-        action_name, params = decision
-
-        # Keyed on the full action incl. params, so playing several different
-        # cards in a row (e.g. a turn where an energy-refund card lets you
-        # squeeze in extra plays) doesn't look like a stuck loop. This only
-        # fires for a genuinely identical action repeated back to back.
-        key = (state.get("state_type"), action_name, tuple(sorted(params.items())))
-        if key == self._last_action:
-            self._repeat_count += 1
         else:
-            self._repeat_count = 0
-            self._last_action = key
-        if self._repeat_count and self._repeat_count % STUCK_REPEAT_LIMIT == 0:
-            print(f"[{state.get('state_type')}] '{action_name}' with the same params "
-                  f"has repeated {self._repeat_count} times in a row; still trying it "
-                  f"(check heuristic.py for this state_type if it never progresses).")
+            action_name, params = decision
+            self.watchdog.on_action(state, action_name, params)
+            print(_describe(state, action_name, params))
+            self.logger.log(state, action_name, params)
 
-        print(_describe(state, action_name, params))
-        self.logger.log(state, action_name, params)
+            method = getattr(self.client, action_name)
+            try:
+                method(**params)
+            except STS2ApiError as e:
+                print(f"  -> API rejected action: {e}")
+                self.watchdog.on_action_result(e)
+            else:
+                self.watchdog.on_action_result(None)
 
-        method = getattr(self.client, action_name)
-        try:
-            method(**params)
-        except STS2ApiError as e:
-            print(f"  -> API rejected action: {e}")
+        jam = self.watchdog.check(state)
+        if jam is not None:
+            print(f"[watchdog] JAM ({jam.reason}) on {state.get('state_type')}: {jam.detail}. "
+                  f"Snapshot: {jam.path}")
+            if self.on_jam == "abort":
+                raise JamError(jam)

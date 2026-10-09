@@ -12,6 +12,7 @@ Examples:
   python run.py                  # deliberate pace, ~0.6s between actions
   python run.py --delay 0        # as fast as possible
   python run.py --delay 1.5      # slower, easier to follow
+  python run.py --on-jam abort   # stop if the bot gets stuck (snapshots in data/jams/)
 
   # Dev/testing: warp straight to one encounter instead of playing a full
   # run to reach it (see sts2bot/dev_console.py -- uses the game's own dev
@@ -66,6 +67,11 @@ def main() -> None:
                          help="Seconds to wait between actions (0 = as fast as possible).")
     parser.add_argument("--log-dir", default="data/trajectories",
                          help="Where to write (state, action) trajectory logs for future DNN training.")
+    parser.add_argument("--jam-dir", default="data/jams",
+                         help="Where the watchdog writes snapshots when the bot gets stuck.")
+    parser.add_argument("--on-jam", choices=["continue", "abort"], default="continue",
+                         help="What to do when the watchdog detects a jam: report it and keep "
+                              "going (default), or stop the bot (for unattended runs).")
     parser.add_argument("--start-at", metavar="ENCOUNTER_ID", default=None,
                          help="Dev/testing only: warp to this encounter's fight via the game's dev "
                               "console before starting the bot loop, e.g. NIBBITS_WEAK. See "
@@ -91,7 +97,8 @@ def main() -> None:
     elif args.repeat_test:
         parser.error("--repeat-test requires --start-at")
 
-    bot = Bot(client, strategy, delay=args.delay, log_dir=args.log_dir, on_state=on_state)
+    bot = Bot(client, strategy, delay=args.delay, log_dir=args.log_dir, on_state=on_state,
+              jam_dir=args.jam_dir, on_jam=args.on_jam)
     bot.run_forever()
 
 
