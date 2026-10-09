@@ -10,13 +10,21 @@ Heuristic = teacher + baseline. Live game until the heuristic gate; emulator bef
 
 ## Phase 1 — Combat play (live game, eyeball via `run.py --start-at X --repeat-test`)
 - [ ] 1.1 Named strategy for every Act 1 encounter (`encounters.py` / `encounter_heuristics.py`),
-      then Acts 2-3; confirm unverified fight_ids/entity_ids as they're seen
+      then Acts 2-3. Overgrowth: strategies written for every fight whose notes asked for
+      one; ids/lineups confirmed from game data. Still to do: watch each one live via the dev
+      loader (`python -m sts2bot.loader_ui`), confirm Inklets' left/middle/right = list
+      order, and Underdocks (act 1's alternate act)
 - [ ] 1.2 Generic combat improvements in `heuristic.py` (targeting by intent / kill thresholds
       in multi-enemy fights, 1-3 turn damage lookahead)
 - [ ] 1.3 Potion use: per-potion rule triggers (prevent lethal, elite/boss turn 1,
       use before discarding when slots full); out-of-combat potions (e.g. Foul Potion at
       merchant/? nodes) as special cases
-- [ ] 1.4 Combat evaluator v1: estimate (win?, HP lost) for current deck vs an encounter
+- [ ] 1.4 Combat evaluator v1: estimate (win?, HP lost) for current deck vs an encounter.
+      Option (C) from the kill-by-deadline discussion: score plays by HP lost now + expected
+      HP lost on extra enemy turns. Reuses the draw simulator built for kill-by-deadline
+      (`sample_future_hands` / `max_hand_damage` in `heuristic.py`) -- adds enemy-intent
+      forecasting. `max_hand_damage` is the single place to swap in the Phase 5 emulator
+      once damage depends on powers/relics
 - [ ] 1.5 Crystal Sphere: a scripted subroutine that takes over on that event (not learned)
 
 ## Phase 2 — Deck model & deck-building (Ironclad)
@@ -25,7 +33,8 @@ Heuristic = teacher + baseline. Live game until the heuristic gate; emulator bef
       scaling, acceleration/draw) + a deck "needs" profile, so a good card is worth less
       when the deck already has enough of that bucket
 - [ ] 2.3 Ironclad character strategy: tie archetypes (strength, exhaust, block...) to 2.1/2.2
-- [ ] 2.4 Card reward picks (incl. skip) using 2.1/2.2
+- [ ] 2.4 Card reward picks (incl. skip) using 2.1/2.2. Boss-aware: when the act boss is
+      Vantom (Slippery), value multi-hit and scaling cards higher (see its encounter notes)
 - [ ] 2.5 Upgrade priorities (rest site smith, upgrade effects)
 - [ ] 2.6 Card removal priorities
 - [ ] 2.7 Shop: buy/remove choices, built on 2.1–2.6 + potion rules (1.3)

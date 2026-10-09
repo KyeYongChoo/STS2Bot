@@ -12,6 +12,7 @@ state" and the bot will surface the raw state for manual handling.
 """
 from __future__ import annotations
 
+import functools
 import itertools
 import math
 import random
@@ -76,11 +77,13 @@ _BLOCK_RE = re.compile(r"[Gg]ain\s+(\d+)\s+[Bb]lock")
 _ENEMY_STRENGTH_DEBUFF_RE = re.compile(r"nem(?:y|ies)\s+lose(?:s)?\s+(\d+)\s+Strength")
 
 
+@functools.lru_cache(maxsize=4096)
 def _damage_amount(text: str | None) -> int | None:
     m = _DAMAGE_RE.search(text or "")
     return int(m.group(1)) if m else None
 
 
+@functools.lru_cache(maxsize=4096)
 def _block_amount(text: str | None) -> int | None:
     m = _BLOCK_RE.search(text or "")
     return int(m.group(1)) if m else None
@@ -130,14 +133,71 @@ def _enemy_attack_damage(enemy: dict) -> int:
     return sum(_intent_damage(i) for i in enemy.get("intents", []))
 
 
-def _card_damage(card: dict, enemy_status: list[dict] | None = None) -> int:
-    """A card's damage description is also already adjusted for the
-    player's own current Strength/Weak (Hook.ModifyDamage runs against the
-    attacker regardless of target) -- but NOT for a specific enemy's
-    Vulnerable, since the generic hand-card description is built with no
-    target selected yet. That's the one adjustment still needed here."""
+_HITS_RE = re.compile(r"(\d+)\s+times|\b(twice)\b", re.IGNORECASE)
+
+
+def _card_hits(card: dict) -> int:
+    """Number of damage instances: "Deal 5 damage twice." -> 2, "Deal 3
+    damage 4 times." -> 4, otherwise 1."""
+    return _hits_in_text(card.get("description") or "")
+
+
+@functools.lru_cache(maxsize=4096)
+def _hits_in_text(text: str) -> int:
+    m = _HITS_RE.search(text)
+    if not m:
+        return 1
+    return 2 if m.group(2) else int(m.group(1))
+
+
+def _card_hit_damage(card: dict, enemy_status: list[dict] | None = None) -> int:
+    """Damage per hit against a specific enemy. A card's damage description
+    is already adjusted for the player's own current Strength/Weak
+    (Hook.ModifyDamage runs against the attacker regardless of target) --
+    but NOT for the target's own modifiers, since the generic hand-card
+    description is built with no target selected yet: Vulnerable (x1.5),
+    and Slow (Bygone Effigy: +amount% damage taken from Attacks)."""
     base = _damage_amount(card.get("description")) or 0
-    return round(base * 1.5) if _is_vulnerable(enemy_status) else base
+    if _is_vulnerable(enemy_status):
+        base *= 1.5
+    slow = _status_amount(enemy_status, "Slow")
+    if slow:
+        base *= 1 + slow / 100
+    return round(base)
+
+
+def _card_damage(card: dict, enemy_status: list[dict] | None = None) -> int:
+    """Total damage over all hits (ignores Slippery -- see _combo_damage)."""
+    return _card_hit_damage(card, enemy_status) * _card_hits(card)
+
+
+def _slippery_stacks(enemy_status: list[dict] | None) -> int:
+    """Slippery N: the next N times the enemy loses HP, it loses only 1."""
+    return _status_amount(enemy_status, "Slippery")
+
+
+def _combo_damage(cards: list[dict], enemy_status: list[dict] | None = None) -> int:
+    """Total damage of `cards` played in the given order, with Slippery
+    stacks absorbing hits (each absorbed hit still deals 1)."""
+    stacks = _slippery_stacks(enemy_status)
+    total = 0
+    for card in cards:
+        per_hit = _card_hit_damage(card, enemy_status)
+        if per_hit <= 0:
+            continue
+        for _ in range(_card_hits(card)):
+            if stacks > 0:
+                total += 1
+                stacks -= 1
+            else:
+                total += per_hit
+    return total
+
+
+def _slippery_play_order(cards: list[dict], enemy_status: list[dict] | None = None) -> list[dict]:
+    """Best order against Slippery: smallest hits first, so the big ones
+    land after the stacks are gone."""
+    return sorted(cards, key=lambda c: (_card_hit_damage(c, enemy_status), -_card_hits(c)))
 
 
 def _biggest_threat(enemies: list[dict]) -> dict | None:
@@ -169,6 +229,8 @@ def _greedy_kill_combo(attacks: list[dict], effective_hp: int, energy_budget: in
     """
     if effective_hp <= 0:
         return None
+    if _slippery_stacks(enemy_status) > 0:
+        return _slippery_kill_combo(attacks, effective_hp, energy_budget, enemy_status)
 
     def dmg(c: dict) -> int:
         return _card_damage(c, enemy_status)
@@ -195,6 +257,109 @@ def _greedy_kill_combo(attacks: list[dict], effective_hp: int, energy_budget: in
         if total_dmg >= effective_hp:
             return combo, total_cost
     return None
+
+
+def _slippery_kill_combo(attacks: list[dict], effective_hp: int, energy_budget: int,
+                         enemy_status: list[dict] | None) -> tuple[list[dict], int] | None:
+    """_greedy_kill_combo for a Slippery target, where greedy-by-damage is
+    wrong (a big hit into a stack deals 1). Tries every affordable subset
+    (a hand is at most 10 cards, so <= 1024) in _slippery_play_order and
+    returns the cheapest lethal one, ordered small-hits-first."""
+    affordable = [c for c in attacks if _card_damage(c, enemy_status) > 0
+                  and _cost_int(c.get("cost"), energy_budget) <= energy_budget]
+    best: tuple[list[dict], int] | None = None
+    for r in range(1, len(affordable) + 1):
+        for subset in itertools.combinations(affordable, r):
+            cost = sum(_cost_int(c.get("cost"), energy_budget) for c in subset)
+            if cost > energy_budget or (best is not None and cost >= best[1]):
+                continue
+            ordered = _slippery_play_order(list(subset), enemy_status)
+            if _combo_damage(ordered, enemy_status) >= effective_hp:
+                best = (ordered, cost)
+    return best
+
+
+def max_hand_damage(hand: list[dict], energy: int, enemy_status: list[dict] | None = None) -> int:
+    """Most damage `hand` can deal within `energy` (any subset, played in
+    the best order). Pile cards carry no `type`, so any card with a "Deal X
+    damage" description counts as an attack. This is the one place future-
+    turn damage is estimated -- swap in a real turn simulator (Phase 5
+    emulator) here to cover powers/relics interacting with attacks."""
+    attacks = [c for c in hand if _damage_amount(c.get("description")) is not None
+               and _cost_int(c.get("cost"), energy) <= energy]
+    best = 0
+    for r in range(1, len(attacks) + 1):
+        for subset in itertools.combinations(attacks, r):
+            if sum(_cost_int(c.get("cost"), energy) for c in subset) <= energy:
+                best = max(best, _combo_damage(_slippery_play_order(list(subset), enemy_status), enemy_status))
+    return best
+
+
+def sample_future_hands(draw_pile: list[dict], discard_pile: list[dict], hand: list[dict],
+                        turns: int, draw_amount: int, rng: random.Random) -> list[list[dict]]:
+    """One random draw order: the hands drawn on each of the next `turns`
+    turns. The draw pile is drawn first, then reshuffled from the discard
+    pile -- which by then also holds this turn's hand (played or discarded
+    at end of turn) and every hand drawn since. Ignores exhaust, cards
+    created mid-fight and draw/discard effects; good enough to tell a
+    Defend-heavy draw pile from an attack-heavy one."""
+    pile = list(draw_pile)
+    rng.shuffle(pile)
+    later = list(discard_pile) + list(hand)
+    hands = []
+    for _ in range(turns):
+        drawn: list[dict] = []
+        while len(drawn) < draw_amount:
+            if not pile:
+                if not later:
+                    break
+                pile, later = later, []
+                rng.shuffle(pile)
+            drawn.append(pile.pop())
+        hands.append(drawn)
+        later.extend(drawn)
+    return hands
+
+
+def kill_probability_by_turns(draw_pile: list[dict], discard_pile: list[dict], hand: list[dict],
+                              effective_hp: int, turns: int, energy: int, draw_amount: int,
+                              enemy_status: list[dict] | None = None, samples: int = 300,
+                              hand_damage: Callable[[list[dict], int, list[dict] | None], int] = max_hand_damage,
+                              seed: int = 0) -> float:
+    """P(the next `turns` turns' draws deal >= effective_hp in total),
+    by Monte Carlo over draw orders (seeded, so the same state always
+    gives the same answer). `hand` is this turn's hand, counted only as
+    future discard -- i.e. this is "P(kill by the deadline if I deal no
+    more damage this turn)"."""
+    if effective_hp <= 0:
+        return 1.0
+    if turns <= 0:
+        return 0.0
+    rng = random.Random(seed)
+    hits = 0
+    for _ in range(samples):
+        hands = sample_future_hands(draw_pile, discard_pile, hand, turns, draw_amount, rng)
+        if sum(hand_damage(h, energy, enemy_status) for h in hands) >= effective_hp:
+            hits += 1
+    return hits / samples
+
+
+def expected_damage_over_turns(draw_pile: list[dict], discard_pile: list[dict], hand: list[dict],
+                               turns: int, energy: int, draw_amount: int,
+                               enemy_status: list[dict] | None = None, samples: int = 300,
+                               hand_damage: Callable[[list[dict], int, list[dict] | None], int] = max_hand_damage,
+                               seed: int = 0) -> float:
+    """Average single-target damage over this turn (`hand`) plus the next
+    turns-1 turns' draws."""
+    if turns <= 0:
+        return 0.0
+    rng = random.Random(seed)
+    now = hand_damage(hand, energy, enemy_status)
+    total = 0
+    for _ in range(samples):
+        hands = sample_future_hands(draw_pile, discard_pile, hand, turns - 1, draw_amount, rng)
+        total += now + sum(hand_damage(h, energy, enemy_status) for h in hands)
+    return total / samples
 
 
 def next_draw_probability(predicate, draw_pile: list[dict], discard_pile: list[dict],
@@ -348,6 +513,34 @@ class HeuristicStrategy:
         self._encounter_overrides: dict[str, Callable[[dict, list[dict], Encounter], Action | None]] = \
             build_overrides(self)
 
+        # The encounter this combat was identified as, kept for the whole
+        # combat: identify_encounter needs the full lineup alive, so without
+        # this an override would switch off as soon as one enemy died. A
+        # fresh full match replaces it (e.g. Phrog Parasite -> its 4
+        # Wrigglers match Dense Vegetation; a Pair of Nibbits down to one
+        # matches A Lone Nibbit). `combat_memory` is per-combat scratch
+        # space for overrides (e.g. a target chosen on turn 1); both reset
+        # whenever a non-combat screen is seen or the round counter drops.
+        self.current_encounter: Encounter | None = None
+        self.combat_memory: dict[str, Any] = {}
+        self._last_round: int | None = None
+
+    def _reset_combat(self) -> None:
+        self.current_encounter = None
+        self.combat_memory = {}
+        self._last_round = None
+
+    def _track_encounter(self, state: dict, enemies: list[dict]) -> Encounter | None:
+        round_no = (state.get("battle") or {}).get("round")
+        if self._last_round is not None and round_no is not None and round_no < self._last_round:
+            self._reset_combat()  # a new combat started without a non-combat screen between
+        self._last_round = round_no
+        fresh = identify_encounter(enemies)
+        if fresh is not None and fresh is not self.current_encounter:
+            self.current_encounter = fresh
+            self.combat_memory = {}
+        return self.current_encounter
+
     def _observe_summoners(self, enemies: list[dict]) -> None:
         for e in enemies:
             if _is_summoning(e):
@@ -360,6 +553,8 @@ class HeuristicStrategy:
 
     def decide(self, state: dict) -> Action | None:
         state_type = state.get("state_type")
+        if state_type not in ("monster", "elite", "boss", "hand_select"):
+            self._reset_combat()
         handler = getattr(self, f"_decide_{state_type}", None)
         if handler is None:
             return None
@@ -385,8 +580,8 @@ class HeuristicStrategy:
         enemies = [e for e in battle.get("enemies", []) if e.get("hp", 0) > 0]
         self._observe_summoners(enemies)
 
-        encounter = identify_encounter(enemies)
-        if encounter is not None:
+        encounter = self._track_encounter(state, enemies)
+        if encounter is not None and enemies:
             override = self._encounter_overrides.get(encounter.name)
             if override is not None:
                 action = override(state, enemies, encounter)

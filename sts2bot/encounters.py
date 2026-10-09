@@ -20,6 +20,12 @@ where that ID has actually been observed and recorded; unconfirmed ones are
 left as the wiki's display name in a "?display name" string so they're easy
 to grep for and swap once confirmed.
 
+  - The game's own encounter list (ids + every possible lineup), from the
+    model database copy the Untapped companion app ships (see
+    sts2bot/gamedata.py), read 2026-10-09 -- ground truth for ids and
+    lineups, and the source for every Overgrowth id below that was still a
+    "?" placeholder before.
+
 `fight_id` is the encounter's own ID, distinct from any single enemy's
 entity_id -- what the game's dev console's `fight <id>` command expects
 (see sts2bot/dev_console.py). None where unconfirmed.
@@ -30,6 +36,7 @@ a fight-specific override -- see `_encounter_overrides` in heuristic.py.
 """
 from __future__ import annotations
 
+import itertools
 import re
 from collections import Counter
 from dataclasses import dataclass
@@ -47,6 +54,10 @@ class Encounter:
     enemies: list[str | frozenset[str]]
     fight_id: str | None = None  # console `fight <id>` target; None if unconfirmed
     notes: str = ""
+    # Every possible exact lineup, for encounters whose random slots don't
+    # fit a single `enemies` template (Ruby Raiders: any 3 of 5 raiders).
+    # When set, matching uses these instead of `enemies`.
+    lineups: tuple[tuple[str, ...], ...] = ()
 
 
 def base_entity_id(entity_id: str | None) -> str | None:
@@ -110,7 +121,8 @@ def identify_encounter(enemies: list[dict], pool: list[Encounter] | None = None)
         return None
 
     candidates = [enc for enc in (pool if pool is not None else ACT1_OVERGROWTH)
-                  if _enemies_match(enc.enemies, live)]
+                  if (any(Counter(lineup) == live for lineup in enc.lineups) if enc.lineups
+                      else _enemies_match(enc.enemies, live))]
     return candidates[0] if len(candidates) == 1 else None
 
 
@@ -120,6 +132,9 @@ def identify_encounter(enemies: list[dict], pool: list[Encounter] | None = None)
 # First 3 fights of the act are drawn (3 of 4, no repeats) from the "easy"
 # pool; every fight after that is drawn from "normal". "elite"/"boss" pools
 # are each a flat list you'll face one of, chosen elsewhere by the map gen.
+
+_RUBY_RAIDERS = ("AXE_RUBY_RAIDER", "ASSASSIN_RUBY_RAIDER", "BRUTE_RUBY_RAIDER",
+                 "CROSSBOW_RUBY_RAIDER", "TRACKER_RUBY_RAIDER")
 
 ACT1_OVERGROWTH: list[Encounter] = [
     # --- easy pool (first 3 encounters) ---
@@ -172,40 +187,30 @@ ACT1_OVERGROWTH: list[Encounter] = [
               fight_id="NIBBITS_NORMAL",
               notes="Damage race. Aim to kill 1 by turn 3 or 4. then proceed with normalish rules"),
     Encounter("Ruby Raiders", "monster", "normal",
-              ["?3 of: Axe/Assassin/Brute/Crossbow/Tracker Raider, no dupes"],
+              ["3 distinct of the 5 raiders -- see lineups"],
               fight_id="RUBY_RAIDERS_NORMAL",
-              notes="3 randomly chosen (no repeats) from 5 variants. Confirmed "
-                    "IDs: AXE_RUBY_RAIDER, BRUTE_RUBY_RAIDER, "
-                    "CROSSBOW_RUBY_RAIDER, TRACKER_RUBY_RAIDER. Only "
-                    "ASSASSIN_RUBY_RAIDER still unconfirmed (profile hasn't "
-                    "fought one yet). Assassin Raider (Killshot, flat 10 "
+              lineups=tuple(itertools.combinations(_RUBY_RAIDERS, 3)),
+              notes="3 randomly chosen (no repeats) from 5 variants -- all 10 "
+                    "combinations are in the game's encounter data. Assassin Raider (Killshot, flat 10 "
                     "dmg/turn) and Crossbow Raider (alternates Reload block / "
                     "14 dmg Fire!) are the two worth focusing down first -- "
                     "Assassin has no telegraphed ramp so it's just steady "
                     "damage every turn, and Crossbow's Fire! turn is the "
                     "single biggest hit in the group."),
     Encounter("Swarm of Slimes", "monster", "normal",
-              ["TWIG_SLIME_M", frozenset({"LEAF_SLIME_M", "TWIG_SLIME_M"}), "LEAF_SLIME_S", "TWIG_SLIME_S"],
+              ["TWIG_SLIME_M", "LEAF_SLIME_M", "LEAF_SLIME_S", "TWIG_SLIME_S"],
+              fight_id="SLIMES_NORMAL",
               notes="Kill Medium first then small"),
     Encounter("Shroom and Slime", "monster", "normal",
-              ["?medium slime (random)", "FLYCONID"],
+              [frozenset({"LEAF_SLIME_M", "TWIG_SLIME_M"}), "FLYCONID"],
               fight_id="FLYCONID_NORMAL",
-              notes="fight_id inferred (only fixed member -> keyed by "
-                    "FLYCONID), not double-checked -- FLYCONID_NORMAL might "
-                    "instead be Overgrowth Flora if the game's naming picked "
-                    "the other fixed-member fight for this key; re-verify by "
-                    "console-warping to it and reading battle.enemies." \
-                    "" \
-                    "More notes: Damage race, kill slime first then Flyconid"),
+              notes="fight_id and lineups confirmed by the game's encounter data."
+                    " More notes: Damage race, kill slime first then Flyconid"),
     Encounter("Overgrowth Flora", "monster", "normal",
               ["SNAPPING_JAXFRUIT", "FLYCONID"],
               fight_id="SNAPPING_JAXFRUIT_NORMAL",
-              notes="fight_id inferred (keyed by its other fixed member, "
-                    "SNAPPING_JAXFRUIT, since FLYCONID_NORMAL was assumed "
-                    "taken by Shroom and Slime) -- same re-verify caveat as "
-                    "that entry." \
-                    "" \
-                    "More notes: Damage Race++ Kill Jaxfruit first"),
+              notes="fight_id confirmed by the game's encounter data."
+                    " More notes: Damage Race++ Kill Jaxfruit first"),
     Encounter("Fogmog", "monster", "normal",
               ["FOGMOG"],
               fight_id="FOGMOG_NORMAL",
@@ -213,12 +218,12 @@ ACT1_OVERGROWTH: list[Encounter] = [
                     "first (heuristic.py already treats known summoners as "
                     "priority target via _known_summoners)."),
     Encounter("Cubex Construct", "monster", "normal",
-              ["?Cubex Construct"],
+              ["CUBEX_CONSTRUCT"],
+              fight_id="CUBEX_CONSTRUCT_NORMAL",
               notes="Charges up, then cycles Repeater Blast x2 (dmg + gains "
                     "2 Str each) into Expel Blast (2-hit). Strength ramps "
                     "every turn it's not interrupted -- worth prioritizing "
-                    "over a pure HP race. Not yet in the profile's "
-                    "enemy_stats (unfought), so entity_id/fight_id unconfirmed."),
+                    "over a pure HP race."),
     Encounter("Vine Shambler", "monster", "normal",
               ["VINE_SHAMBLER"],
               fight_id="VINE_SHAMBLER_NORMAL",
@@ -228,20 +233,25 @@ ACT1_OVERGROWTH: list[Encounter] = [
               fight_id="OVERGROWTH_CRAWLERS",
               notes="Kill Shrinker Bettle first. Damage Race"),
     Encounter("Strangler and Friend", "monster", "normal",
-              ["SLITHERING_STRANGLER",
-               "?Snapping Jaxfruit / medium slime / small slimes (random)"],
+              ["SLITHERING_STRANGLER", "+ a random friend -- see lineups"],
               fight_id="SLITHERING_STRANGLER_NORMAL",
+              lineups=(("LEAF_SLIME_M", "SLITHERING_STRANGLER"),
+                       ("TWIG_SLIME_M", "SLITHERING_STRANGLER"),
+                       ("SNAPPING_JAXFRUIT", "SLITHERING_STRANGLER"),
+                       ("LEAF_SLIME_S", "LEAF_SLIME_S", "SLITHERING_STRANGLER"),
+                       ("LEAF_SLIME_S", "TWIG_SLIME_S", "SLITHERING_STRANGLER"),
+                       ("TWIG_SLIME_S", "TWIG_SLIME_S", "SLITHERING_STRANGLER")),
               notes="Damage race until 1 enemy left"),
 
     # --- event (not a map Monster node, but a real fight) ---
     Encounter("Dense Vegetation", "event", "event",
-              ["?Wriggler", "?Wriggler", "?Wriggler", "?Wriggler"],
+              ["WRIGGLER", "WRIGGLER", "WRIGGLER", "WRIGGLER"],
+              fight_id="DENSE_VEGETATION_EVENT_ENCOUNTER",
               notes="Triggered by the Dense Vegetation event, not a normal "
                     "map node. 4 Wrigglers -- same add-type Phrog Parasite "
                     "summons on death, so its attack pattern (Nasty Bite 6 "
-                    "dmg / Wriggle: shuffle Infection + gain 2 Str) applies." \
-                    "" \
-                    "Choices for focusing down matter - ideally you can kill one every 2 turns or every 1 turn, so if this turn you cant kill an attacking wriggler, attack a not attacking wriggler so you can kill it next turn. Also, if you can full or almost full block this turns attack then attack the next enemy instead so you have a chance of killing the enemy"),
+                    "dmg / Wriggle: shuffle Infection + gain 2 Str) applies."
+                    " Choices for focusing down matter - ideally you can kill one every 2 turns or every 1 turn, so if this turn you cant kill an attacking wriggler, attack a not attacking wriggler so you can kill it next turn. Also, if you can full or almost full block this turns attack then attack the next enemy instead so you have a chance of killing the enemy"),
 
     # --- elites (one fought per Elite node) ---
     Encounter("Bygone Effigy", "elite", "elite",
@@ -256,28 +266,27 @@ ACT1_OVERGROWTH: list[Encounter] = [
                     "ramping turn-over-turn, there's no urgency to rush it "
                     "down before then -- but once Wake resolves, every card "
                     "you dump into one turn multiplies via Slow, so hold "
-                    "burst for after Wake rather than before." \
-                    "" \
-                    "Consider all attack cards, and if you have energy to dump on defends after playing attack cards, play defends first, then attack to optimize the damage. When it wakes up, just attack full on, accept any HP trade, unless your draw pile is likely to draw enough damage to kill it next turn"),
+                    "burst for after Wake rather than before."
+                    " Consider all attack cards, and if you have energy to dump on defends after playing attack cards, play defends first, then attack to optimize the damage. When it wakes up, just attack full on, accept any HP trade, unless your draw pile is likely to draw enough damage to kill it next turn"),
     Encounter("Byrdonis", "elite", "elite",
-              ["?Byrdonis"],
+              ["BYRDONIS"],
+              fight_id="BYRDONIS_ELITE",
               notes="Alternates Swoop (17 dmg) / Peck (3x3 dmg). Territorial: "
                     "gains Strength at end of every turn, and since Peck hits "
                     "3x, each Str point is worth 3x normal on Peck turns -- "
                     "this fight punishes going long far more than most, favor "
-                    "a fast kill over a grindy block-and-chip plan." \
-                    "" \
-                    "Accept any HP trade to deal damage, unless you're sure youre able to kill next turn and you can get away with playing less than max possible damage"),
+                    "a fast kill over a grindy block-and-chip plan."
+                    " Accept any HP trade to deal damage, unless you're sure youre able to kill next turn and you can get away with playing less than max possible damage"),
     Encounter("Phrog Parasite", "elite", "elite",
-              ["?Phrog Parasite"],
+              ["PHROG_PARASITE"],
+              fight_id="PHROG_PARASITE_ELITE",
               notes="Alternates Infect (shuffles 3 Infection into discard) / "
                     "Lash (4x4 dmg). On death, Infested triggers and summons "
                     "4 Wrigglers (Nasty Bite 6 dmg, or Wriggle: shuffle "
                     "Infection + gain 2 Str) -- this is a two-phase fight, "
                     "budget block/cards for the post-death add wave rather "
-                    "than dumping everything into the killing blow." \
-                    "" \
-                    "Goal is to kill by turn 4/5 (simulate shuffles and damage), then pretend its the dense vegation event"),
+                    "than dumping everything into the killing blow."
+                    " Goal is to kill by turn 4/5 (simulate shuffles and damage), then pretend its the dense vegation event"),
 
     # --- bosses (one fought per Boss node) ---
     Encounter("Ceremonial Beast", "boss", "boss",
@@ -291,11 +300,11 @@ ACT1_OVERGROWTH: list[Encounter] = [
                     "cycles Beast Cry (Ringing: 1 card/turn limit) / Stomp "
                     "(15 dmg) / Crush (17 dmg, +3 Str). Since Plow strips all "
                     "accumulated Strength on trigger, racing to the stun "
-                    "threshold matters more than trickling damage in." \
-                    "" \
-                    "damage race to stun threshold, then play normally"),
+                    "threshold matters more than trickling damage in."
+                    " damage race to stun threshold, then play normally"),
     Encounter("The Kin", "boss", "boss",
-              ["?Kin Priest", "?Kin Follower", "?Kin Follower"],
+              ["KIN_PRIEST", "KIN_FOLLOWER", "KIN_FOLLOWER"],
+              fight_id="THE_KIN_BOSS",
               notes="3-enemy fight. Kin Priest 190 HP (199 asc8): cycles Orb "
                     "of Frailty (8 dmg + Frail) / Orb of Weakness (8 dmg + "
                     "Weak) / Soul Beam (3x3 dmg) / Dark Ritual (+2 Str). Each "
@@ -307,9 +316,8 @@ ACT1_OVERGROWTH: list[Encounter] = [
                     "heuristic.py) except the priority target is the "
                     "non-summoning leader, not a summoner, so that mechanism "
                     "doesn't directly apply; a dedicated encounter override "
-                    "should just hard-code Kin Priest as the always-target." \
-                    "" \
-                    "Start of fight calculate expected single target damage by round 8. If more than Kin priest HP, Attack Kin Priest. If less than Kin Priest HP, target a cult follower first"),
+                    "should just hard-code Kin Priest as the always-target."
+                    " Start of fight calculate expected single target damage by round 8. If more than Kin priest HP, Attack Kin Priest. If less than Kin Priest HP, target a cult follower first"),
     Encounter("Vantom", "boss", "boss",
               ["VANTOM"],
               fight_id="VANTOM_BOSS",
@@ -323,7 +331,6 @@ ACT1_OVERGROWTH: list[Encounter] = [
                     "against a normal HP pool. Also telegraphs Dismember one "
                     "turn ahead (it's on a fixed cycle), so it's worth saving "
                     "burst block for that specific turn rather than spreading "
-                    "block evenly." \
-                    "" \
-                    "This boss is the most unique, where whether you're winning or not happens before the fight itself. Incentivize multihit cards if act boss is vantom, as well as scaling cards. dont play large value attacks until slipper stacks are gone, play small attacks or multihits."),
+                    "block evenly."
+                    " This boss is the most unique, where whether you're winning or not happens before the fight itself. Incentivize multihit cards if act boss is vantom, as well as scaling cards. dont play large value attacks until slipper stacks are gone, play small attacks or multihits."),
 ]
