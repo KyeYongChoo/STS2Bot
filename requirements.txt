@@ -1,2 +1,7 @@
 requests>=2.31
 numpy>=1.26
+
+# Only needed for run.py --start-at/--repeat-test (sts2bot/dev_console.py) --
+# not used by normal bot play.
+pyautogui>=0.9.54
+pygetwindow>=0.0.9

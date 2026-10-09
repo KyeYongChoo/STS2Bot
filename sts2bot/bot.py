@@ -19,7 +19,7 @@ def _describe(state: dict, action_name: str, params: dict) -> str:
 
 class Bot:
     def __init__(self, client: STS2Client, strategy: HeuristicStrategy, delay: float = 0.6,
-                 log_dir: str = "data/trajectories"):
+                 log_dir: str = "data/trajectories", on_state=None):
         self.client = client
         self.strategy = strategy
         self.delay = delay
@@ -27,6 +27,11 @@ class Bot:
         self.logger = TrajectoryLogger(run_id, log_dir=log_dir)
         self._last_action: tuple[str, str] | None = None
         self._repeat_count = 0
+        # Optional callback(state) invoked every poll before deciding an
+        # action -- lets external tooling (e.g. sts2bot/dev_console.py's
+        # encounter test loop) observe state transitions like "combat just
+        # ended" without Bot needing to know anything about that use case.
+        self.on_state = on_state
 
     def run_forever(self) -> None:
         print("Waiting for Slay the Spire 2 (STS2MCP API)...")
@@ -43,6 +48,8 @@ class Bot:
 
     def _step(self) -> None:
         state = self.client.get_state()
+        if self.on_state is not None:
+            self.on_state(state)
         decision = self.strategy.decide(state)
 
         if decision is None:

@@ -12,11 +12,15 @@ state" and the bot will surface the raw state for manual handling.
 """
 from __future__ import annotations
 
+import itertools
+import math
 import random
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
+from sts2bot.encounters import Encounter, base_entity_id as _enemy_base_id
+from sts2bot.encounters import identify_encounter
 from sts2bot.tierlist import TierList
 
 Action = tuple[str, dict[str, Any]]
@@ -26,6 +30,11 @@ REST_LOW_HP_THRESHOLD = 0.6
 ELITE_SAFE_HP_THRESHOLD = 0.65
 POTION_EMERGENCY_HP_THRESHOLD = 0.3
 BLOCK_DECK_FRACTION_THRESHOLD = 0.33
+
+# Enumerate every possible next-turn draw exactly (see
+# _kill_probability_next_turn) while it's cheap; beyond this, Monte Carlo
+# sample instead. Not Nibbit-specific, just defined near its only caller.
+_EXACT_ENUM_LIMIT = 20_000
 
 # Roughly descending "how good is it to grab this map node" when nothing
 # more specific applies. Tune freely.
@@ -117,12 +126,6 @@ def _is_summoning(enemy: dict) -> bool:
     return any(i.get("type") == "Summon" for i in enemy.get("intents", []))
 
 
-def _enemy_base_id(entity_id: str | None) -> str | None:
-    if not entity_id:
-        return None
-    return re.sub(r"_\d+$", "", entity_id)
-
-
 def _enemy_attack_damage(enemy: dict) -> int:
     return sum(_intent_damage(i) for i in enemy.get("intents", []))
 
@@ -194,6 +197,67 @@ def _greedy_kill_combo(attacks: list[dict], effective_hp: int, energy_budget: in
     return None
 
 
+def next_draw_probability(predicate, draw_pile: list[dict], discard_pile: list[dict],
+                           draw_amount: int, samples: int = _EXACT_ENUM_LIMIT) -> float:
+    """P(predicate(hand) is True) for a hand of `draw_amount` Pile Card
+    Objects drawn next turn from `draw_pile` (reshuffling `discard_pile` in
+    when the draw pile runs short, approximated below). General-purpose:
+    not tied to any one fight or question -- "can I kill X next turn",
+    "will I have a Block card next turn", "can I hit the Y-damage threshold
+    before enemy Z's turn", whatever `predicate` checks for one sampled hand
+    (a list of Pile Card Objects).
+
+    Exact by direct enumeration over every possible draw while the
+    combination space is small enough (typical early-run pile sizes are a
+    few thousand combinations at most -- cheap and simpler than working out
+    the hypergeometric formula for non-interchangeable cards). Falls back
+    to uniform-random Monte Carlo sampling once the pile's too big for that
+    to be cheap, since exhaustively enumerating a late-run pile isn't
+    tractable and doesn't need to be for an estimate.
+
+    If the draw pile is about to run dry mid-draw, the game reshuffles the
+    discard pile back in. Approximated here by pooling draw_pile +
+    discard_pile whenever draw_pile is short -- slightly optimistic (this
+    turn's still-unplayed hand will add to discard before that reshuffle
+    happens, which isn't accounted for), but this only affects the rare
+    late-fight low-pile case.
+    """
+    pool = list(draw_pile)
+    if len(pool) < draw_amount:
+        pool = pool + list(discard_pile)
+    n = len(pool)
+    if n == 0:
+        return 0.0
+    draw_amount = min(draw_amount, n)
+
+    total = math.comb(n, draw_amount)
+    if total <= _EXACT_ENUM_LIMIT:
+        hits = sum(1 for idxs in itertools.combinations(range(n), draw_amount)
+                   if predicate([pool[i] for i in idxs]))
+        return hits / total
+
+    hits = sum(1 for _ in range(samples)
+               if predicate([pool[i] for i in random.sample(range(n), draw_amount)]))
+    return hits / samples
+
+
+def _kill_probability_next_turn(draw_pile: list[dict], discard_pile: list[dict],
+                                 draw_amount: int, energy_budget: int,
+                                 effective_hp: int, enemy_status: list[dict] | None = None) -> float:
+    """P(a hand drawn next turn can solo-kill effective_hp within
+    energy_budget) -- see next_draw_probability for the sampling mechanics.
+    `draw_pile`/`discard_pile` are Pile Card Objects (name/cost/description
+    only, no `type`) -- any card with a parseable damage number in its
+    description is treated as an attack, same as _greedy_kill_combo does
+    internally via _card_damage.
+    """
+    def is_lethal_hand(hand: list[dict]) -> bool:
+        attacks = [c for c in hand if _damage_amount(c.get("description")) is not None]
+        return _greedy_kill_combo(attacks, effective_hp, energy_budget, enemy_status) is not None
+
+    return next_draw_probability(is_lethal_hand, draw_pile, discard_pile, draw_amount)
+
+
 def _defense_value(card: dict) -> int:
     """How much this card reduces HP loss this turn: real Block (any card
     type -- Iron Wave is an Attack that also grants Block) plus a
@@ -217,6 +281,29 @@ def _estimate_defense(cards: list[dict], energy_budget: int) -> int:
         total += _defense_value(c)
         total_cost += cost
     return total
+
+
+def _best_sufficient_defender(defenders: list[dict], needed_block: int, energy_budget: int,
+                               enemy_status: list[dict] | None = None) -> dict | None:
+    """The best single defender that alone covers `needed_block`. Among
+    cards that qualify, prefers whichever also deals the most bonus damage
+    (via _card_damage) -- a dual-purpose card like Mangle (Attack + enemy
+    Strength-debuff) covers the same block requirement as a plain Defend
+    while also landing real damage for the same or similar energy, which a
+    "favor damage" strategy should always take over a pure-block card,
+    even if the pure-block card happens to be a little cheaper. Cost is
+    only the tiebreaker among cards that deal equal bonus damage (e.g.
+    picking the cheaper of two plain Defends). Falls back to the single
+    highest-value affordable defender when nothing alone suffices -- still
+    the best one card can do this call."""
+    affordable = [c for c in defenders if _cost_int(c.get("cost"), energy_budget) <= energy_budget]
+    if not affordable:
+        return None
+    sufficient = [c for c in affordable if _defense_value(c) >= needed_block]
+    if sufficient:
+        return max(sufficient, key=lambda c: (_card_damage(c, enemy_status),
+                                               -_cost_int(c.get("cost"), energy_budget)))
+    return max(affordable, key=_defense_value)
 
 
 def _hp_frac(player: dict | None) -> float:
@@ -244,6 +331,22 @@ class HeuristicStrategy:
         # summoner is what stops the respawn loop; whacking the adds it
         # keeps producing doesn't.
         self._known_summoners: set[str] = set()
+
+        # Per-encounter overrides, keyed by Encounter.name (see
+        # sts2bot/encounters.py) -- built by sts2bot/encounter_heuristics.py,
+        # which is where all the fight-specific strategy content (and the
+        # bulk of the per-enemy discussion this project involves) lives, to
+        # keep this file to the generic engine. Imported lazily here rather
+        # than at module level: encounter_heuristics.py imports combat-math
+        # helpers back from this module, and this module never needs
+        # anything from it except at construction time.
+        # Signature: (state: dict, enemies: list[dict], encounter: Encounter)
+        #            -> Action | None. Returning None falls through to the
+        # generic _decide_combat for that call, so an override can handle
+        # just one decision (e.g. targeting) and defer the rest.
+        from sts2bot.encounter_heuristics import build_overrides
+        self._encounter_overrides: dict[str, Callable[[dict, list[dict], Encounter], Action | None]] = \
+            build_overrides(self)
 
     def _observe_summoners(self, enemies: list[dict]) -> None:
         for e in enemies:
@@ -281,6 +384,14 @@ class HeuristicStrategy:
         energy = player.get("energy", 0)
         enemies = [e for e in battle.get("enemies", []) if e.get("hp", 0) > 0]
         self._observe_summoners(enemies)
+
+        encounter = identify_encounter(enemies)
+        if encounter is not None:
+            override = self._encounter_overrides.get(encounter.name)
+            if override is not None:
+                action = override(state, enemies, encounter)
+                if action is not None:
+                    return action
 
         playable = [c for c in hand if c.get("can_play") and _cost_int(c.get("cost"), energy) <= energy]
         if not playable or not enemies:
